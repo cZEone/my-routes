@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<title>My Routes</title>
+<style>
+  :root {
+    --bg: #f5f5f4; --card: #ffffff; --text: #1c1917; --muted: #78716c; --line: #e7e5e4;
+    --accent: #0f766e; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --chip: #f0fdfa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0a09; --card: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --line: #292524;
+      --accent: #2dd4bf; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --chip: #134e4a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; background: var(--bg); padding: 12px 16px 8px; z-index: 1; }
+  .tabs { display: flex; gap: 8px; overflow-x: auto; }
+  .tab { border: 1px solid var(--line); background: var(--card); color: var(--text);
+    padding: 6px 14px; border-radius: 999px; font: inherit; cursor: pointer; white-space: nowrap; }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .status.err { color: var(--bad); font-weight: 600; }
+  main { padding: 0 16px 24px; max-width: 560px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-top: 12px; }
+  .card.best { border-color: var(--accent); border-width: 2px; }
+  .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .leave { font-size: 22px; font-weight: 700; }
+  .arrive { text-align: right; }
+  .arrive b { font-size: 22px; }
+  .name { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  ol { list-style: none; padding: 0; margin: 12px 0 0; border-top: 1px solid var(--line); }
+  li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  .ic { text-align: center; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .t { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 6px; background: var(--chip); color: var(--accent); margin-left: 4px; }
+  .tag.est { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .busno { font-weight: 700; }
+</style>
+</head>
+<body>
+<header>
+  <div class="tabs" id="tabs" role="tablist"></div>
+  <div class="status" id="status">Loading…</div>
+</header>
+<main id="main"></main>
+
+<script src="routes.js"></script>
+<script>
+const API = "https://arrivelah2.busrouter.sg/?id=";
+const MIN = 60000;
+const REFRESH_MS = 30000;
+const GPS_TOLERANCE = 0.0005; // degrees (~50 m)
+
+let data = {};        // stopCode -> { serviceNo -> [ {t, lat, lng, live} ] }
+let lastOk = null;    // time of last successful fetch
+let lastErr = null;
+let current = 0;
+try { current = +localStorage.getItem("dest") || 0; } catch {}
+if (!CONFIG.destinations[current]) current = 0;
+
+const fmt = ms => new Date(ms).toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit", hour12: false });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function stopsNeeded(dest) {
+  const s = new Set();
+  for (const r of dest.routes) for (const l of r.legs) if (l.bus) { s.add(l.from); s.add(l.to); }
+  return [...s];
+}
+
+async function fetchStop(code) {
+  const res = await fetch(API + code, { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const json = await res.json();
+  const out = {};
+  for (const svc of json.services || []) {
+    out[svc.no] = [svc.next, svc.next2, svc.next3]
+      .filter(b => b && b.time)
+      .map(b => ({ t: Date.parse(b.time), lat: b.lat, lng: b.lng, live: b.monitored === 1 && b.lat !== 0 }));
+  }
+  return out;
+}
+
+async function refresh() {
+  const codes = stopsNeeded(CONFIG.destinations[current]);
+  const results = await Promise.allSettled(codes.map(fetchStop));
+  let failed = 0;
+  results.forEach((r, i) => r.status === "fulfilled" ? (data[codes[i]] = r.value) : failed++);
+  if (failed) lastErr = `${failed}/${codes.length} stops failed to load`;
+  else { lastErr = null; lastOk = Date.now(); }
+  render();
+}
+
+// Work out one route: which bus you catch on each leg and when you arrive.
+function plan(route, now) {
+  const margin = CONFIG.connectionMarginMin;
+  let t = now, leaveAt = null, broken = false, preWalk = 0;
+  const steps = [];
+  for (const leg of route.legs) {
+    if (broken) { steps.push({ leg }); continue; }
+    if (leg.walk != null || leg.train) {
+      const m = leg.walk ?? leg.min;
+      if (leaveAt === null) preWalk += m;
+      t += m * MIN;
+      steps.push({ leg, end: t });
+      continue;
+    }
+    const buses = data[leg.from]?.[leg.bus] || [];
+    const first = leaveAt === null;
+    const ready = t;
+    const bus = buses.find(b => b.t >= ready);
+    const missed = first ? null : buses.filter(b => b.t < ready && b.t >= ready - 3 * MIN).pop();
+    if (!bus) { broken = true; steps.push({ leg, none: true, missed }); continue; }
+
+    let status = null, wait = (bus.t - ready) / MIN;
+    if (first) leaveAt = bus.t - preWalk * MIN;
+    else status = (wait >= margin && bus.live) ? "ok" : "warn";
+
+    // Find the same physical bus at the alighting stop by GPS position.
+    let arr = null, tracked = false;
+    if (bus.live) {
+      const m = (data[leg.to]?.[leg.bus] || []).find(b =>
+        b.live && Math.abs(b.lat - bus.lat) < GPS_TOLERANCE && Math.abs(b.lng - bus.lng) < GPS_TOLERANCE && b.t >= bus.t);
+      if (m) { arr = m.t; tracked = true; }
+    }
+    if (arr === null) arr = bus.t + leg.rideMin * MIN;
+    t = arr;
+    steps.push({ leg, bus, wait, status, missed, arr, tracked });
+  }
+  return { route, steps, leaveAt, arrive: broken ? null : t };
+}
+
+function legHtml(s) {
+  const l = s.leg;
+  if (l.walk != null) return `<li><span class="ic">🚶</span><span>${esc(l.label || "Walk")}<div class="sub">${l.walk} min</div></span><span class="t">${s.end ? fmt(s.end) : ""}</span></li>`;
+  if (l.train) return `<li><span class="ic">🚇</span><span>${esc(l.train)}<div class="sub">${l.min} min (fixed)</div></span><span class="t">${s.end ? fmt(s.end) : ""}</span></li>`;
+  const head = `<span class="busno">${esc(l.bus)}</span> ${esc(l.fromName || l.from)} → ${esc(l.toName || l.to)}`;
+  if (!s.bus && !s.none) return `<li><span class="ic">🚌</span><span>${head}</span><span class="t sub">—</span></li>`;
+  let conn = "";
+  if (s.missed) conn += `<div class="bad">❌ just miss ${fmt(s.missed.t)}</div>`;
+  if (s.none) return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="bad">No catchable bus in live data</div></span><span class="t">?</span></li>`;
+  if (s.status === "ok") conn += `<div class="ok">✅ ${Math.floor(s.wait)} min to spare</div>`;
+  if (s.status === "warn") conn += `<div class="warn">⚠️ ${s.wait < margin() ? (s.wait < 1 ? "under 1" : Math.floor(s.wait)) + " min to spare" : "bus not GPS-tracked"}</div>`;
+  const src = s.bus.live ? `<span class="tag">live</span>` : `<span class="tag est">timetable</span>`;
+  const ride = s.tracked ? `<span class="tag">tracked</span>` : `<span class="tag est">~${l.rideMin} min est.</span>`;
+  return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="sub">board ${fmt(s.bus.t)} ${src} · off ${fmt(s.arr)} ${ride}</div></span><span class="t">${fmt(s.arr)}</span></li>`;
+}
+const margin = () => CONFIG.connectionMarginMin;
+
+function render() {
+  const dests = CONFIG.destinations;
+  document.getElementById("tabs").innerHTML = dests.map((d, i) =>
+    `<button class="tab" role="tab" aria-selected="${i === current}" data-i="${i}">${esc(d.name)}</button>`).join("");
+
+  const now = Date.now();
+  const st = document.getElementById("status");
+  const age = lastOk ? Math.round((now - lastOk) / 1000) : null;
+  if (lastErr || (age !== null && age > 90)) {
+    st.className = "status err";
+    st.textContent = `⚠ ${lastErr || "Data is stale"}${lastOk ? ` — last good update ${fmt(lastOk)} (${age}s ago)` : ""}`;
+  } else {
+    st.className = "status";
+    st.textContent = lastOk ? `Updated ${new Date(lastOk).toLocaleTimeString("en-SG", { hour12: false })} · refreshes every 30s` : "Loading…";
+  }
+  if (!lastOk && !Object.keys(data).length) { document.getElementById("main").innerHTML = ""; return; }
+
+  const plans = dests[current].routes.map(r => plan(r, now))
+    .sort((a, b) => (a.arrive ?? Infinity) - (b.arrive ?? Infinity));
+  document.getElementById("main").innerHTML = plans.map((p, i) => {
+    let leave = "—";
+    if (p.leaveAt !== null) {
+      const m = Math.floor((p.leaveAt - now) / MIN);
+      leave = m <= 0 ? `<span class="bad">Leave now</span>` : `Leave in ${m} min`;
+    }
+    return `<section class="card ${i === 0 && p.arrive ? "best" : ""}">
+      <div class="top">
+        <div><div class="leave">${leave}</div><div class="name">${esc(p.route.name)}${p.leaveAt !== null ? ` · leave ${fmt(p.leaveAt)}` : ""}</div></div>
+        <div class="arrive"><div class="sub">arrive</div><b>${p.arrive ? fmt(p.arrive) : "?"}</b></div>
+      </div>
+      <ol>${p.steps.map(legHtml).join("")}</ol>
+    </section>`;
+  }).join("");
+}
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest(".tab"); if (!b) return;
+  current = +b.dataset.i;
+  try { localStorage.setItem("dest", current); } catch {}
+  render(); refresh();
+});
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+setInterval(render, 10000); // keep "leave in X min" ticking between fetches
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
