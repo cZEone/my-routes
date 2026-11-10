@@ -116,7 +116,16 @@ function plan(route, now) {
     const buses = data[leg.from]?.[leg.bus] || [];
     const first = leaveAt === null;
     const ready = t;
-    const bus = buses.find(b => b.t >= ready);
+    let bus = buses.find(b => b.t >= ready);
+    // Beyond the 3 listed buses: project the next one from the average gap between them.
+    if (!bus && buses.length >= 2) {
+      const gap = (buses[buses.length - 1].t - buses[0].t) / (buses.length - 1);
+      if (gap > MIN) {
+        let t2 = buses[buses.length - 1].t;
+        while (t2 < ready) t2 += gap;
+        bus = { t: t2, live: false, projected: true };
+      }
+    }
     const missed = first ? null : buses.filter(b => b.t < ready && b.t >= ready - 3 * MIN).pop();
     if (!bus) { broken = true; steps.push({ leg, none: true, missed }); continue; }
 
@@ -148,8 +157,8 @@ function legHtml(s) {
   if (s.missed) conn += `<div class="bad">❌ just miss ${fmt(s.missed.t)}</div>`;
   if (s.none) return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="bad">No catchable bus in live data</div></span><span class="t">?</span></li>`;
   if (s.status === "ok") conn += `<div class="ok">✅ ${Math.floor(s.wait)} min to spare</div>`;
-  if (s.status === "warn") conn += `<div class="warn">⚠️ ${s.wait < margin() ? (s.wait < 1 ? "under 1" : Math.floor(s.wait)) + " min to spare" : "bus not GPS-tracked"}</div>`;
-  const src = s.bus.live ? `<span class="tag">live</span>` : `<span class="tag est">timetable</span>`;
+  if (s.status === "warn") conn += `<div class="warn">⚠️ ${s.bus.projected ? "next bus not listed yet, guessed from frequency" : s.wait < margin() ? (s.wait < 1 ? "under 1" : Math.floor(s.wait)) + " min to spare" : "bus not GPS-tracked"}</div>`;
+  const src = s.bus.live ? `<span class="tag">live</span>` : `<span class="tag est">${s.bus.projected ? "guess" : "timetable"}</span>`;
   const ride = s.tracked ? `<span class="tag">tracked</span>` : `<span class="tag est">~${l.rideMin} min est.</span>`;
   return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="sub">board ${fmt(s.bus.t)} ${src} · off ${fmt(s.arr)} ${ride}</div></span><span class="t">${fmt(s.arr)}</span></li>`;
 }

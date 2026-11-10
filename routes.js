@@ -52,6 +52,15 @@ window.CONFIG = {
             { bus: "518", from: "72179", fromName: "HomeTeamNS", to: "09047", toName: "Orchard Stn/Tang Plaza", rideMin: 25 }, // TODO
           ],
         },
+        {
+          name: "69 → MRT",
+          legs: [
+            { walk: 5, label: "Home → Opp Blk 871A" }, // TODO: your walk time from home
+            { bus: "69", from: "75151", fromName: "Opp Blk 871A", to: "75009", toName: "Tampines Int", rideMin: 7 }, // TODO
+            { walk: 3, label: "Walk to Tampines MRT" }, // TODO
+            { train: "Tampines → Orchard", min: 40 }, // TODO: incl. wait + change at City Hall
+          ],
+        },
       ],
     },
   ],
