@@ -26,6 +26,15 @@ const toTheAlps = {
   ],
 };
 
+// Any of several buses between the same two stops: the app picks whichever gets you there first.
+const anyBus = (nos, from, fromName, to, toName, rideMin) => ({
+  options: nos.map(no => ({ name: no, legs: [{ bus: no, from, fromName, to, toName, rideMin }] })),
+});
+const walkTo75171 = { walk: 3, label: "Home → UWCSEA" }; // assumed: 71 m from 75179
+const walkSimeiToCCSS = { walk: 8, label: "Simei Stn → Changkat Changi Sec" }; // TODO
+const walk76081ToYMPS = { walk: 5, label: "Opp Holy Trinity Ch → Yumin Pri" }; // TODO
+const walk76171ToYMPS = { walk: 3, label: "Blk 266 → Yumin Pri" }; // TODO
+
 window.CONFIG = {
   connectionMarginMin: 2, // ✅ if you reach the stop at least this many minutes before the bus
   destinations: [
@@ -128,6 +137,88 @@ window.CONFIG = {
                 },
               ],
             },
+          ],
+        },
+      ],
+    },
+    {
+      name: "CCSS",
+      routes: [
+        {
+          name: "69 → MRT",
+          legs: [
+            walkTo75151,
+            { bus: "69", from: "75151", fromName: "Opp Blk 871A", to: "75009", toName: "Tampines Int", rideMin: 7 }, // TODO
+            { walk: 3, label: "Walk to Tampines MRT" }, // TODO
+            { train: "Tampines → Simei (EW)", min: 6 }, // TODO: incl. wait, 1 stop
+            walkSimeiToCCSS,
+          ],
+        },
+        {
+          name: "118 → 5",
+          legs: [
+            { walk: 3, label: "Home → Blk 874" }, // assumed same as 75151 (52 m apart)
+            { bus: "118", from: "75159", fromName: "Blk 874", to: "96289", toName: "Changi General Hosp", rideMin: 9 }, // TODO
+            { bus: "5", from: "96289", fromName: "Changi General Hosp", to: "96169", toName: "Simei Stn", rideMin: 3 }, // TODO
+            walkSimeiToCCSS,
+          ],
+        },
+      ],
+    },
+    {
+      name: "YMPS",
+      routes: [
+        {
+          name: "454 → 8/18/28/59",
+          legs: [
+            walkTo75179,
+            { bus: "454", from: "75179", fromName: "Blk 871C", to: "75051", toName: "Tampines West Stn Exit B", rideMin: 8 }, // TODO
+            anyBus(["8", "18", "28", "59"], "75051", "Tampines West Stn Exit B", "76081", "Opp Holy Trinity Ch", 4), // TODO
+            walk76081ToYMPS,
+          ],
+        },
+        {
+          name: "298 → 8",
+          legs: [
+            walkTo75179,
+            { bus: "298", from: "75179", fromName: "Blk 871C", to: "75251", toName: "Opp Tropica Condo", rideMin: 5 }, // TODO
+            { bus: "8", from: "75251", fromName: "Opp Tropica Condo", to: "76081", toName: "Opp Holy Trinity Ch", rideMin: 9 }, // TODO
+            walk76081ToYMPS,
+          ],
+        },
+        {
+          name: "34",
+          legs: [
+            walkTo75171,
+            { bus: "34", from: "75171", fromName: "UWCSEA", to: "76081", toName: "Opp Holy Trinity Ch", rideMin: 10 }, // TODO
+            walk76081ToYMPS,
+          ],
+        },
+        {
+          name: "34A → 20/292/39",
+          legs: [
+            walkTo75171,
+            { bus: "34A", from: "75171", fromName: "UWCSEA", to: "76059", toName: "Opp Our Tampines Hub", rideMin: 6 }, // TODO
+            anyBus(["20", "292", "39"], "76059", "Opp Our Tampines Hub", "76081", "Opp Holy Trinity Ch", 5), // TODO
+            walk76081ToYMPS,
+          ],
+        },
+        {
+          name: "34A → 3",
+          legs: [
+            walkTo75171,
+            { bus: "34A", from: "75171", fromName: "UWCSEA", to: "76059", toName: "Opp Our Tampines Hub", rideMin: 6 }, // TODO
+            { bus: "3", from: "76059", fromName: "Opp Our Tampines Hub", to: "76171", toName: "Blk 266", rideMin: 7 }, // TODO
+            walk76171ToYMPS,
+          ],
+        },
+        {
+          name: "454 → 3",
+          legs: [
+            walkTo75179,
+            { bus: "454", from: "75179", fromName: "Blk 871C", to: "76141", toName: "Tampines Stn/Int", rideMin: 10 }, // TODO
+            { bus: "3", from: "76141", fromName: "Tampines Stn/Int", to: "76171", toName: "Blk 266", rideMin: 4 }, // TODO
+            walk76171ToYMPS,
           ],
         },
       ],

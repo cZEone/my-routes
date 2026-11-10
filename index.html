@@ -145,7 +145,7 @@ function planLegs(legs, now) {
       }
     }
     const missed = first ? null : buses.filter(b => b.t < ready && b.t >= ready - 3 * MIN).pop();
-    if (!bus) { broken = true; steps.push({ leg, none: true, missed }); continue; }
+    if (!bus) { broken = true; steps.push({ leg, none: true, missed, notRunning: !buses.length }); continue; }
 
     let status = null, wait = (bus.t - ready) / MIN;
     if (first) leaveAt = bus.t - preWalk * MIN;
@@ -173,7 +173,7 @@ function legHtml(s) {
   if (!s.bus && !s.none) return `<li><span class="ic">🚌</span><span>${head}</span><span class="t sub">—</span></li>`;
   let conn = "";
   if (s.missed) conn += `<div class="bad">❌ just miss ${fmt(s.missed.t)}</div>`;
-  if (s.none) return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="bad">No catchable bus in live data</div></span><span class="t">?</span></li>`;
+  if (s.none) return `<li><span class="ic">🚌</span><span>${head}${conn}<div class="bad">${s.notRunning ? `${esc(l.bus)} isn't running right now` : "No catchable bus in live data"}</div></span><span class="t">?</span></li>`;
   if (s.status === "ok") conn += `<div class="ok">✅ ${Math.floor(s.wait)} min to spare</div>`;
   if (s.status === "warn") conn += `<div class="warn">⚠️ ${s.bus.projected ? "next bus not listed yet, guessed from frequency" : s.wait < margin() ? (s.wait < 1 ? "under 1" : Math.floor(s.wait)) + " min to spare" : "bus not GPS-tracked"}</div>`;
   const src = s.bus.live ? `<span class="tag">live</span>` : `<span class="tag est">${s.bus.projected ? "guess" : "timetable"}</span>`;
