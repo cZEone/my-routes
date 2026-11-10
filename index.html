@@ -72,7 +72,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 
 function stopsNeeded(dest) {
   const s = new Set();
-  for (const r of dest.routes) for (const l of r.legs) if (l.bus) { s.add(l.from); s.add(l.to); }
+  for (const r of dest.routes) for (const v of expand(r.legs)) for (const l of v.legs) if (l.bus) { s.add(l.from); s.add(l.to); }
   return [...s];
 }
 
@@ -99,12 +99,30 @@ async function refresh() {
   render();
 }
 
-// Work out one route: which bus you catch on each leg and when you arrive.
+// Expand { options: [{ name, legs }] } legs into every flat combination of legs.
+function expand(legs) {
+  let variants = [{ legs: [], via: [] }];
+  for (const leg of legs) {
+    if (!leg.options) { variants.forEach(v => v.legs.push(leg)); continue; }
+    variants = variants.flatMap(v => leg.options.map(o => ({ legs: [...v.legs, ...o.legs], via: [...v.via, o.name] })));
+  }
+  return variants;
+}
+
+// Work out a route: try every combination of options, keep the earliest arrival
+// (ties: the one that lets you leave latest).
 function plan(route, now) {
+  const tries = expand(route.legs).map(v => ({ ...planLegs(v.legs, now), via: v.via }));
+  tries.sort((a, b) => (a.arrive ?? Infinity) - (b.arrive ?? Infinity) || (b.leaveAt ?? 0) - (a.leaveAt ?? 0));
+  return { route, ...tries[0], ways: tries.length };
+}
+
+// Work out one flat list of legs: which bus you catch on each leg and when you arrive.
+function planLegs(legs, now) {
   const margin = CONFIG.connectionMarginMin;
   let t = now, leaveAt = null, broken = false, preWalk = 0;
   const steps = [];
-  for (const leg of route.legs) {
+  for (const leg of legs) {
     if (broken) { steps.push({ leg }); continue; }
     if (leg.walk != null || leg.train) {
       const m = leg.walk ?? leg.min;
@@ -144,7 +162,7 @@ function plan(route, now) {
     t = arr;
     steps.push({ leg, bus, wait, status, missed, arr, tracked });
   }
-  return { route, steps, leaveAt, arrive: broken ? null : t };
+  return { steps, leaveAt, arrive: broken ? null : t };
 }
 
 function legHtml(s) {
@@ -191,7 +209,7 @@ function render() {
     }
     return `<section class="card ${i === 0 && p.arrive ? "best" : ""}">
       <div class="top">
-        <div><div class="leave">${leave}</div><div class="name">${esc(p.route.name)}${p.leaveAt !== null ? ` · leave ${fmt(p.leaveAt)}` : ""}</div></div>
+        <div><div class="leave">${leave}</div><div class="name">${esc(p.route.name)}${p.leaveAt !== null ? ` · leave ${fmt(p.leaveAt)}` : ""}</div>${p.ways > 1 ? `<div class="sub">⇄ fastest of ${p.ways} ways: ${esc(p.via.join(", "))}</div>` : ""}</div>
         <div class="arrive"><div class="sub">arrive</div><b>${p.arrive ? fmt(p.arrive) : "?"}</b></div>
       </div>
       <ol>${p.steps.map(legHtml).join("")}</ol>
